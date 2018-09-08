@@ -2754,6 +2754,15 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		release_sock(sk);
 		return err;
 	}
+	case TCP_TMPBUFFER: {
+		if (optlen != sizeof(tp->tmpbuf))
+			return -EINVAL;
+
+		if (copy_from_user(&tp->tmpbuf, optval, optlen))
+			return -EFAULT;
+
+		return 0;
+	}
 	case TCP_FASTOPEN_KEY: {
 		__u8 key[TCP_FASTOPEN_KEY_LENGTH];
 
@@ -3427,6 +3436,17 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 			return -EFAULT;
 		return 0;
 
+	case TCP_TMPBUFFER: {
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		len = min_t(unsigned int, len, sizeof(tp->tmpbuf));
+		if (put_user(len, optlen))
+			return -EFAULT;
+		if (copy_to_user(optval, tp->tmpbuf, len))
+			return -EFAULT;
+		return 0;
+	}
 	case TCP_FASTOPEN_KEY: {
 		__u8 key[TCP_FASTOPEN_KEY_LENGTH];
 		struct tcp_fastopen_context *ctx;
