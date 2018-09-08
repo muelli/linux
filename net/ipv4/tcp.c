@@ -3507,6 +3507,49 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 			return -EFAULT;
 		return 0;
 	}
+	case TCP_FASTOPEN_COOKIE_GEN: {
+		struct tcp_fastopen_cookie foc = {0};
+		struct tcp_fastopen_context *ctx;
+		u8 buf[sizeof(tp->tmpbuf)];
+
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+
+		rcu_read_lock();
+		ctx = rcu_dereference(icsk->icsk_accept_queue.fastopenq.ctx);
+		if (!ctx) {
+            ctx = rcu_dereference(sock_net(sk)->ipv4.tcp_fastopen_ctx);
+		}
+		
+		if (ctx) {
+		    memcpy(buf, tp->tmpbuf, sizeof(tp->tmpbuf));
+            crypto_cipher_encrypt_one(ctx->tfm, foc.val, buf);
+            len = foc.len = TCP_FASTOPEN_COOKIE_SIZE;
+		} else {
+            printk ("K: CGen: No ctx!!1 \n");
+			len = 0;
+		}
+		rcu_read_unlock();
+
+		printk("K: TFO Cookie Generate\n");
+
+		lock_sock(sk);
+		release_sock(sk);
+
+		printk("K: Generate Cookie of length %d\n", foc.len);
+		hex_dump_to_buffer(foc.val, sizeof(foc.val),
+		    16, 1,
+		    buf, sizeof(buf), true);
+		printk("K: Generate cookie buffer: %s\n", buf);
+
+		len = min_t(unsigned int, len, sizeof(foc.val));
+		if (put_user(len, optlen))
+			return -EFAULT;
+		if (copy_to_user(optval, &foc.val, foc.len))
+			return -EFAULT;
+		return 0;
+	}
 	case TCP_THIN_LINEAR_TIMEOUTS:
 		val = tp->thin_lto;
 		break;
