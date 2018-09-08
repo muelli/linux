@@ -549,21 +549,31 @@ void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
 			    struct tcp_fastopen_cookie *cookie)
 {
 	struct tcp_metrics_block *tm;
+	struct dst_entry *dst;
 
 	rcu_read_lock();
-	tm = tcp_get_metrics(sk, __sk_dst_get(sk), false);
-	if (tm) {
-		struct tcp_fastopen_metrics *tfom = &tm->tcpm_fastopen;
-		unsigned int seq;
+	//printk ("K: enter tcp_fastopen_cache_get\n");
+	dst = __sk_dst_get(sk);
+	//printk ("K: got dst %x\n", dst);
+	if (!dst) {
+	    printk ("K: tfo cache_get: no dst!!1\n");
+	} else {
+    	tm = tcp_get_metrics(sk, dst, false);
+    	//printk ("K: got mettric %x\n", tm);
+    	if (tm) {
+    		struct tcp_fastopen_metrics *tfom = &tm->tcpm_fastopen;
+    		//printk ("K: tfom: %x\n", tfom);
+    		unsigned int seq;
 
-		do {
-			seq = read_seqbegin(&fastopen_seqlock);
-			if (tfom->mss)
-				*mss = tfom->mss;
-			*cookie = tfom->cookie;
-			if (cookie->len <= 0 && tfom->try_exp == 1)
-				cookie->exp = true;
-		} while (read_seqretry(&fastopen_seqlock, seq));
+    		do {
+    			seq = read_seqbegin(&fastopen_seqlock);
+    			if (tfom->mss)
+    				*mss = tfom->mss;
+    			*cookie = tfom->cookie;
+    			if (cookie->len <= 0 && tfom->try_exp == 1)
+    				cookie->exp = true;
+    		} while (read_seqretry(&fastopen_seqlock, seq));
+    	}
 	}
 	rcu_read_unlock();
 }
@@ -575,8 +585,10 @@ void tcp_fastopen_cache_set(struct sock *sk, u16 mss,
 	struct dst_entry *dst = __sk_dst_get(sk);
 	struct tcp_metrics_block *tm;
 
-	if (!dst)
+	if (!dst) {
+	    printk ("K: no dst, no cache_set\n");
 		return;
+	}
 	rcu_read_lock();
 	tm = tcp_get_metrics(sk, dst, true);
 	if (tm) {

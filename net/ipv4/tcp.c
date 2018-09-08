@@ -2765,6 +2765,55 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 
 		return tcp_fastopen_reset_cipher(net, sk, key, sizeof(key));
 	}
+	case TCP_FASTOPEN_COOKIE: {
+		struct tcp_fastopen_cookie cookie;
+		u8 cookieval[TCP_FASTOPEN_COOKIE_MAX];
+		u16 mss;
+		char buf[1024];
+
+		printk("K: Setting cookie!!1\n");
+
+		if (optlen != TCP_FASTOPEN_COOKIE_SIZE) { // || optlen != sizeof(cookie.val)) { // FIXME: This could be a better check involving TCP_FASTOPEN_COOKIE_MIN
+		    printk("K: wrong size %d. Expected %ld\n", optlen, sizeof(cookie.val));
+			return -EINVAL;
+		}
+
+		if (copy_from_user(cookie.val, optval, optlen)) {
+		    printk("K: copy_form_user.\n");
+			return -EFAULT;
+		}
+
+		mss = 23; //FIXME: WTF.
+		cookie.len = optlen;
+		cookie.exp = 0; // Dunno if we need that.
+
+		printk("K: Set Cookie of length %d\n", cookie.len);
+		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
+		    16, 1,
+		    buf, sizeof(buf), true);
+		printk("K: Set cookie buffer: %s\n", buf);
+
+		lock_sock(sk);
+		//rcu_read_lock();
+		tcp_fastopen_cache_set(sk, mss, &cookie,
+		    false, false);
+		//rcu_read_unlock();
+
+		{
+		    u16 mss1 = 0;
+            struct tcp_fastopen_cookie checked_cookie = {.len=0};
+		    bool check = tcp_fastopen_cookie_check (sk, &mss1, &checked_cookie);
+		    printk ("K: Set cookie check: %d %d\n", check, checked_cookie.len);
+		}
+        {
+            int err = -99;
+		    bool defer = tcp_fastopen_defer_connect(sk, &err);
+		    printk ("K: Sanitycheck: %d %d\n", defer, err);
+		}
+		release_sock(sk);
+		printk ("K: done\n");
+		return 0;
+	}
 	default:
 		/* fallthru */
 		break;
@@ -3397,6 +3446,44 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		if (put_user(len, optlen))
 			return -EFAULT;
 		if (copy_to_user(optval, key, len))
+			return -EFAULT;
+		return 0;
+	}
+	case TCP_FASTOPEN_COOKIE: {
+		//struct tcp_fastopen_context *ctx;
+		struct tcp_fastopen_cookie cookie = {0};
+		u16 mss = 0;
+		char buf[1024];
+
+		printk("K: TFO Cookie Get\n");
+
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		lock_sock(sk);
+        {
+            int err = -99;
+		    bool defer = tcp_fastopen_defer_connect(sk, &err);
+		    printk ("K: GET defer connect: %d %d\n", defer, err);
+		}
+
+		if (tcp_fastopen_cookie_check(sk, &mss, &cookie) == true) {
+		    printk ("K: Yay! Cookies!\n");
+		} else {
+		    printk ("K: Nope cookies :(\n");
+		}
+		release_sock(sk);
+
+		printk("K: Get Cookie of length %d\n", cookie.len);
+		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
+		    16, 1,
+		    buf, sizeof(buf), true);
+		printk("K: Get cookie buffer: %s\n", buf);
+
+		len = min_t(unsigned int, len, sizeof(cookie));
+		if (put_user(len, optlen))
+			return -EFAULT;
+		if (copy_to_user(optval, &cookie, len))
 			return -EFAULT;
 		return 0;
 	}
