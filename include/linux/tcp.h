@@ -387,8 +387,6 @@ struct tcp_sock {
 	 */
 	struct request_sock *fastopen_rsk;
 	u32	*saved_syn;
-
-	__be32 tmpbuf[4];
 };
 
 enum tsq_enum {

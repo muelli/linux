@@ -89,6 +89,8 @@ enum {
 #define TCP_MSS_DESIRED		1220U	/* IPv6 (tunneled), EDNS0 (RFC3226) */
 
 /* TCP socket options */
+#define TCP_FASTOPEN_COOKIE	37	/* Set the cookie for outgoing client connections or get the cookie for an incoming connection */
+#define TCP_FASTOPEN_COOKIE_GEN        39      /* Generates a TFO cookie for the source,destination in the tmpbuffer */
 #define TCP_NODELAY		1	/* Turn off Nagle's algorithm. */
 #define TCP_MAXSEG		2	/* Limit MSS */
 #define TCP_CORK		3	/* Never send partially complete segments */
@@ -124,9 +126,6 @@ enum {
 #define TCP_FASTOPEN_NO_COOKIE	34	/* Enable TFO without a TFO cookie */
 #define TCP_ZEROCOPY_RECEIVE	35
 #define TCP_INQ			36	/* Notify bytes available to read as a cmsg on read */
-#define TCP_FASTOPEN_COOKIE	37	/* Set the cookie for outgoing client connections or get the cookie for an incoming connection */
-#define TCP_FASTOPEN_COOKIE_GEN	39	/* Generates a TFO cookie for the source,destination in the tmpbuffer */
-#define TCP_TMPBUFFER	38	/* Sets the tmpbuffer of the tcp socket. It's a dirty hack... */
 
 #define TCP_CM_INQ		TCP_INQ
 
