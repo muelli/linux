@@ -3515,6 +3515,10 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		if (get_user(len, optlen))
 			return -EFAULT;
 
+		if (len != sizeof(buf))
+			return -EINVAL;
+		if (copy_from_user(&buf, optval, len))
+			return -EFAULT;
 
 		rcu_read_lock();
 		ctx = rcu_dereference(icsk->icsk_accept_queue.fastopenq.ctx);
@@ -3523,7 +3527,6 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		}
 		
 		if (ctx) {
-		    memcpy(buf, tp->tmpbuf, sizeof(tp->tmpbuf));
             crypto_cipher_encrypt_one(ctx->tfm, foc.val, buf);
             len = foc.len = TCP_FASTOPEN_COOKIE_SIZE;
 		} else {
