@@ -3491,14 +3491,19 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 	case TCP_FASTOPEN_COOKIE_GEN: {
 		struct tcp_fastopen_cookie foc = {0};
 		struct tcp_fastopen_context *ctx;
-		u8 buf[8];
+        __be32 path[4] = {  /* to be overwritten by the user */
+            1 /* iph->saddr; to be overwritten by the user */,
+            2 /* iph->daddr: to be overwritten by the user */,
+            3 /* should be 0 */,
+            4 /* should be 0 */
+        };
 
 		if (get_user(len, optlen))
 			return -EFAULT;
 
-		if (len != sizeof(buf))
+		if (len != sizeof(path))
 			return -EINVAL;
-		if (copy_from_user(&buf, optval, len))
+		if (copy_from_user(&path, optval, len))
 			return -EFAULT;
 
 		rcu_read_lock();
@@ -3508,7 +3513,7 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		}
 		
 		if (ctx) {
-            crypto_cipher_encrypt_one(ctx->tfm, foc.val, buf);
+            crypto_cipher_encrypt_one(ctx->tfm, foc.val, (u8*) path);
             len = foc.len = TCP_FASTOPEN_COOKIE_SIZE;
 		} else {
             printk ("K: CGen: No ctx!!1 \n");
@@ -3524,8 +3529,8 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		printk("K: Generate Cookie of length %d\n", foc.len);
 		hex_dump_to_buffer(foc.val, sizeof(foc.val),
 		    16, 1,
-		    buf, sizeof(buf), true);
-		printk("K: Generate cookie buffer: %s\n", buf);
+		    (char*) path, sizeof(path), true);
+		printk("K: Generate cookie buffer: %s\n", path);
 
 		len = min_t(unsigned int, len, sizeof(foc.val));
 		if (put_user(len, optlen))
