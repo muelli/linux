@@ -2801,6 +2801,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		//rcu_read_unlock();
 
 		{
+		    u16 checked_mss = 0;
+            struct tcp_fastopen_cookie checked_cookie = {.len=0};
+            tcp_fastopen_cache_get(sk, &checked_mss, &checked_cookie);
+            printk ("\n");
+		}
+		{
 		    u16 mss1 = 0;
             struct tcp_fastopen_cookie checked_cookie = {.len=0};
 		    bool check = tcp_fastopen_cookie_check (sk, &mss1, &checked_cookie);
@@ -3488,6 +3494,7 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 			return -EFAULT;
 		return 0;
 	}
+
 	case TCP_FASTOPEN_COOKIE_GEN: {
 		struct tcp_fastopen_cookie foc = {0};
 		struct tcp_fastopen_context *ctx;
@@ -3498,11 +3505,15 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
             4 /* should be 0 */
         };
 
+        printk ("Generating cookie for %lu\n", len);
+
 		if (get_user(len, optlen))
 			return -EFAULT;
 
-		if (len != sizeof(path))
+		if (len != sizeof(path)) {
+		    printk ("Expected %lu got %lu\n", sizeof (path), len);
 			return -EINVAL;
+		}
 		if (copy_from_user(&path, optval, len))
 			return -EFAULT;
 
@@ -3526,15 +3537,20 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		lock_sock(sk);
 		release_sock(sk);
 
-		printk("K: Generate Cookie of length %d\n", foc.len);
-		hex_dump_to_buffer(foc.val, sizeof(foc.val),
-		    16, 1,
-		    (char*) path, sizeof(path), true);
-		printk("K: Generate cookie buffer: %s\n", path);
+		{
+		    char hexbuf[256];
+		    printk("K: Generate Cookie of length %d\n", foc.len);
+		    hex_dump_to_buffer(foc.val, sizeof(foc.val),
+		        16, 1,
+		        hexbuf, sizeof(hexbuf), true);
+		    printk("K: Generate cookie buffer: %s\n", hexbuf);
+	    }
 
 		len = min_t(unsigned int, len, sizeof(foc.val));
-		if (put_user(len, optlen))
+		if (put_user(len, optlen)) {
+		    printk ("cookie gen: put_user\n");
 			return -EFAULT;
+		}
 		if (copy_to_user(optval, &foc.val, foc.len))
 			return -EFAULT;
 		return 0;
