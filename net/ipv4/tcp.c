@@ -2768,9 +2768,9 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 	}
 	case TCP_FASTOPEN_COOKIE: {
 		struct tcp_fastopen_cookie cookie;
-		u8 cookieval[TCP_FASTOPEN_COOKIE_MAX];
+		//u8 cookieval[TCP_FASTOPEN_COOKIE_MAX];
 		u16 mss;
-		char buf[1024];
+		char buf[256];
 
 		printk("K: Setting cookie!!1\n");
 
@@ -3460,7 +3460,7 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		//struct tcp_fastopen_context *ctx;
 		struct tcp_fastopen_cookie cookie = {0};
 		u16 mss = 0;
-		char buf[1024];
+		char buf[512];
 
 		printk("K: TFO Cookie Get\n");
 
@@ -3538,7 +3538,7 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		release_sock(sk);
 
 		{
-		    char hexbuf[256];
+		    char hexbuf[128];
 		    printk("K: Generate Cookie of length %d\n", foc.len);
 		    hex_dump_to_buffer(foc.val, sizeof(foc.val),
 		        16, 1,
