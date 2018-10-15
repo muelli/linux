@@ -116,6 +116,7 @@ static bool __tcp_fastopen_cookie_gen(struct sock *sk, const void *path,
 {
 	struct tcp_fastopen_context *ctx;
 	bool ok = false;
+	const bool debug = false;
 
 	rcu_read_lock();
 
@@ -127,6 +128,26 @@ static bool __tcp_fastopen_cookie_gen(struct sock *sk, const void *path,
 		crypto_cipher_encrypt_one(ctx->tfm, foc->val, path);
 		foc->len = TCP_FASTOPEN_COOKIE_SIZE;
 		ok = true;
+
+		if (debug) {
+		    char hexbuf[128];
+		    printk ("TCPFOCGen: really created this cookie now\n");
+		    hex_dump_to_buffer (foc->val, 16,
+		        16, 1,
+		        hexbuf, sizeof (hexbuf), true
+		    );
+		    printk ("cook: %s\n", hexbuf);
+		    hex_dump_to_buffer (ctx->key, 16,
+		        16, 1,
+		        hexbuf, sizeof (hexbuf), true
+		    );
+		    printk ("key : %s\n", hexbuf);
+		    hex_dump_to_buffer (path, 16,
+		        16, 1,
+		        hexbuf, sizeof (hexbuf), true
+		    );
+		    printk ("path: %s\n", hexbuf);
+		}
 	}
 	rcu_read_unlock();
 	return ok;

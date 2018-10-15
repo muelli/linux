@@ -2770,9 +2770,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		struct tcp_fastopen_cookie cookie;
 		//u8 cookieval[TCP_FASTOPEN_COOKIE_MAX];
 		u16 mss;
+		const bool debug = false;
 		char buf[256];
 
-		printk("K: Setting cookie!!1\n");
+		if (debug) {
+		    printk("K: Setting cookie!!1\n");
+	    }
 
 		if (optlen != TCP_FASTOPEN_COOKIE_SIZE) { // || optlen != sizeof(cookie.val)) { // FIXME: This could be a better check involving TCP_FASTOPEN_COOKIE_MIN
 		    printk("K: wrong size %d. Expected %ld\n", optlen, sizeof(cookie.val));
@@ -2788,11 +2791,13 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		cookie.len = optlen;
 		cookie.exp = 0; // Dunno if we need that.
 
-		printk("K: Set Cookie of length %d\n", cookie.len);
-		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
-		    16, 1,
-		    buf, sizeof(buf), true);
-		printk("K: Set cookie buffer: %s\n", buf);
+		if (debug) {
+    		printk("K: Set Cookie of length %d\n", cookie.len);
+    		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
+    		    16, 1,
+    		    buf, sizeof(buf), true);
+    		printk("K: Set cookie buffer: %s\n", buf);
+		}
 
 		lock_sock(sk);
 		//rcu_read_lock();
@@ -2800,25 +2805,29 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		    false, false);
 		//rcu_read_unlock();
 
-		{
-		    u16 checked_mss = 0;
-            struct tcp_fastopen_cookie checked_cookie = {.len=0};
-            tcp_fastopen_cache_get(sk, &checked_mss, &checked_cookie);
-            printk ("\n");
-		}
-		{
-		    u16 mss1 = 0;
-            struct tcp_fastopen_cookie checked_cookie = {.len=0};
-		    bool check = tcp_fastopen_cookie_check (sk, &mss1, &checked_cookie);
-		    printk ("K: Set cookie check: %d %d\n", check, checked_cookie.len);
-		}
-        {
-            int err = -99;
-		    bool defer = tcp_fastopen_defer_connect(sk, &err);
-		    printk ("K: Sanitycheck: %d %d\n", defer, err);
-		}
+		if (debug) {
+    		{
+    		    u16 checked_mss = 0;
+                struct tcp_fastopen_cookie checked_cookie = {.len=0};
+                tcp_fastopen_cache_get(sk, &checked_mss, &checked_cookie);
+                printk ("\n");
+    		}
+    		{
+    		    u16 mss1 = 0;
+                struct tcp_fastopen_cookie checked_cookie = {.len=0};
+    		    bool check = tcp_fastopen_cookie_check (sk, &mss1, &checked_cookie);
+    		    printk ("K: Set cookie check: %d %d\n", check, checked_cookie.len);
+    		}
+            {
+                int err = -99;
+    		    bool defer = tcp_fastopen_defer_connect(sk, &err);
+    		    printk ("K: Sanitycheck: %d %d\n", defer, err);
+    		}
+    	}
 		release_sock(sk);
-		printk ("K: done\n");
+		if (debug) {
+		    printk ("K: done\n");
+	    }
 		return 0;
 	}
 	default:
@@ -3505,17 +3514,38 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
             4 /* should be 0 */
         };
 
-        printk ("Generating cookie for %lu\n", len);
+        printk ("Generating cookie for %u\n", len);
 
 		if (get_user(len, optlen))
 			return -EFAULT;
 
 		if (len != sizeof(path)) {
-		    printk ("Expected %lu got %lu\n", sizeof (path), len);
+		    printk ("Expected %lu got %u\n", sizeof (path), len);
 			return -EINVAL;
 		}
 		if (copy_from_user(&path, optval, len))
 			return -EFAULT;
+
+		/* Begin Sanity Check */
+		{
+		    char hexbuf[128];
+		    __be32 zero = 0;
+
+		    hex_dump_to_buffer(path, sizeof(path),
+		        16, 1,
+		        hexbuf, sizeof(hexbuf), true);
+		    printk("K: Incoming path: %s\n", hexbuf);
+
+		    if (path[2] != zero) {
+		        printk ("Arghs, path2 not null: %u\n", path[2]);
+		        return -EINVAL;
+		    }
+		    if (path[3] != zero) {
+		        printk ("Arghs, path3 not null: %u\n", path[3]);
+		        return -EINVAL;
+		    }
+		}
+		/* End Sanity Check */
 
 		rcu_read_lock();
 		ctx = rcu_dereference(icsk->icsk_accept_queue.fastopenq.ctx);
@@ -3524,6 +3554,17 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		}
 		
 		if (ctx) {
+            { /* For debug purposes. The result is non-deterministic,
+                 i.e. calling twice in a row produces the same result, but
+                 calling from two difference processes produces different
+                 results. Does the key change? */
+                 char hexbuf[128];
+		        // memcpy(key, ctx->key, sizeof(key));
+    		    hex_dump_to_buffer(ctx->key, TCP_FASTOPEN_KEY_LENGTH,
+	    	        16, 1,
+		            hexbuf, sizeof(hexbuf), true);
+		        printk ("Cookiegen Key: %s\n", hexbuf);
+	        }
             crypto_cipher_encrypt_one(ctx->tfm, foc.val, (u8*) path);
             len = foc.len = TCP_FASTOPEN_COOKIE_SIZE;
 		} else {
