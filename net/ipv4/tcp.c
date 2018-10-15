@@ -2787,7 +2787,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			return -EFAULT;
 		}
 
-		mss = 23; //FIXME: WTF.
+		mss = 523; //FIXME: WTF. I don't know how to determine the segment size. But for our experiemnt we need ~500 bytes.
 		cookie.len = optlen;
 		cookie.exp = 0; // Dunno if we need that.
 
