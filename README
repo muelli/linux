@@ -1,3 +1,339 @@
+This is a pretty normal Linux kernel with a few patches on top which 
+enable the setting and retrieval of the "cookie" used for TCP Fastopen.
+
+This kernel behaves and builds like a normal Linux kernel,
+so a "make deb" should give an installable package.
+You may want to configure the kernel to your needs, though.
+
+The patch is essentially:
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 4491faf83f4f..0bf55f04706c 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2754,6 +2754,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
+ 		release_sock(sk);
+ 		return err;
+ 	}
++
+ 	case TCP_FASTOPEN_KEY: {
+ 		__u8 key[TCP_FASTOPEN_KEY_LENGTH];
+ 
+@@ -2765,6 +2766,70 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
+ 
+ 		return tcp_fastopen_reset_cipher(net, sk, key, sizeof(key));
+ 	}
++	case TCP_FASTOPEN_COOKIE: {
++		struct tcp_fastopen_cookie cookie;
++		//u8 cookieval[TCP_FASTOPEN_COOKIE_MAX];
++		u16 mss;
++		const bool debug = false;
++		char buf[256];
++
++		if (debug) {
++		    printk("K: Setting cookie!!1\n");
++	    }
++
++		if (optlen != TCP_FASTOPEN_COOKIE_SIZE) { // || optlen != sizeof(cookie.val)) { // FIXME: This could be a better check involving TCP_FASTOPEN_COOKIE_MIN
++		    printk("K: wrong size %d. Expected %ld\n", optlen, sizeof(cookie.val));
++			return -EINVAL;
++		}
++
++		if (copy_from_user(cookie.val, optval, optlen)) {
++		    printk("K: copy_form_user.\n");
++			return -EFAULT;
++		}
++
++		mss = 523; //FIXME: WTF. I don't know how to determine the segment size. But for our experiemnt we need ~500 bytes.
++		cookie.len = optlen;
++		cookie.exp = 0; // Dunno if we need that.
++
++		if (debug) {
++    		printk("K: Set Cookie of length %d\n", cookie.len);
++    		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
++    		    16, 1,
++    		    buf, sizeof(buf), true);
++    		printk("K: Set cookie buffer: %s\n", buf);
++		}
++
++		lock_sock(sk);
++		//rcu_read_lock();
++		tcp_fastopen_cache_set(sk, mss, &cookie,
++		    false, false);
++		//rcu_read_unlock();
++
++		if (debug) {
++    		{
++    		    u16 checked_mss = 0;
++                struct tcp_fastopen_cookie checked_cookie = {.len=0};
++                tcp_fastopen_cache_get(sk, &checked_mss, &checked_cookie);
++                printk ("\n");
++    		}
++    		{
++    		    u16 mss1 = 0;
++                struct tcp_fastopen_cookie checked_cookie = {.len=0};
++    		    bool check = tcp_fastopen_cookie_check (sk, &mss1, &checked_cookie);
++    		    printk ("K: Set cookie check: %d %d\n", check, checked_cookie.len);
++    		}
++            {
++                int err = -99;
++    		    bool defer = tcp_fastopen_defer_connect(sk, &err);
++    		    printk ("K: Sanitycheck: %d %d\n", defer, err);
++    		}
++    	}
++		release_sock(sk);
++		if (debug) {
++		    printk ("K: done\n");
++	    }
++		return 0;
++	}
+ 	default:
+ 		/* fallthru */
+ 		break;
+@@ -3400,6 +3465,137 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
+ 			return -EFAULT;
+ 		return 0;
+ 	}
++	case TCP_FASTOPEN_COOKIE: {
++		//struct tcp_fastopen_context *ctx;
++		struct tcp_fastopen_cookie cookie = {0};
++		u16 mss = 0;
++		char buf[512];
++
++		printk("K: TFO Cookie Get\n");
++
++		if (get_user(len, optlen))
++			return -EFAULT;
++
++		lock_sock(sk);
++        {
++            int err = -99;
++		    bool defer = tcp_fastopen_defer_connect(sk, &err);
++		    printk ("K: GET defer connect: %d %d\n", defer, err);
++		}
++
++		if (tcp_fastopen_cookie_check(sk, &mss, &cookie) == true) {
++		    printk ("K: Yay! Cookies!\n");
++		} else {
++		    printk ("K: Nope cookies :(\n");
++		}
++		release_sock(sk);
++
++		printk("K: Get Cookie of length %d\n", cookie.len);
++		hex_dump_to_buffer(cookie.val, sizeof(cookie.val),
++		    16, 1,
++		    buf, sizeof(buf), true);
++		printk("K: Get cookie buffer: %s\n", buf);
++
++		len = min_t(unsigned int, len, sizeof(cookie));
++		if (put_user(len, optlen))
++			return -EFAULT;
++		if (copy_to_user(optval, &cookie, len))
++			return -EFAULT;
++		return 0;
++	}
++
++	case TCP_FASTOPEN_COOKIE_GEN: {
++		struct tcp_fastopen_cookie foc = {0};
++		struct tcp_fastopen_context *ctx;
++        __be32 path[4] = {  /* to be overwritten by the user */
++            1 /* iph->saddr; to be overwritten by the user */,
++            2 /* iph->daddr: to be overwritten by the user */,
++            3 /* should be 0 */,
++            4 /* should be 0 */
++        };
++
++        printk ("Generating cookie for %u\n", len);
++
++		if (get_user(len, optlen))
++			return -EFAULT;
++
++		if (len != sizeof(path)) {
++		    printk ("Expected %lu got %u\n", sizeof (path), len);
++			return -EINVAL;
++		}
++		if (copy_from_user(&path, optval, len))
++			return -EFAULT;
++
++		/* Begin Sanity Check */
++		{
++		    char hexbuf[128];
++		    __be32 zero = 0;
++
++		    hex_dump_to_buffer(path, sizeof(path),
++		        16, 1,
++		        hexbuf, sizeof(hexbuf), true);
++		    printk("K: Incoming path: %s\n", hexbuf);
++
++		    if (path[2] != zero) {
++		        printk ("Arghs, path2 not null: %u\n", path[2]);
++		        return -EINVAL;
++		    }
++		    if (path[3] != zero) {
++		        printk ("Arghs, path3 not null: %u\n", path[3]);
++		        return -EINVAL;
++		    }
++		}
++		/* End Sanity Check */
++
++		rcu_read_lock();
++		ctx = rcu_dereference(icsk->icsk_accept_queue.fastopenq.ctx);
++		if (!ctx) {
++            ctx = rcu_dereference(sock_net(sk)->ipv4.tcp_fastopen_ctx);
++		}
++		
++		if (ctx) {
++            { /* For debug purposes. The result is non-deterministic,
++                 i.e. calling twice in a row produces the same result, but
++                 calling from two difference processes produces different
++                 results. Does the key change? */
++                 char hexbuf[128];
++		        // memcpy(key, ctx->key, sizeof(key));
++    		    hex_dump_to_buffer(ctx->key, TCP_FASTOPEN_KEY_LENGTH,
++	    	        16, 1,
++		            hexbuf, sizeof(hexbuf), true);
++		        printk ("Cookiegen Key: %s\n", hexbuf);
++	        }
++            crypto_cipher_encrypt_one(ctx->tfm, foc.val, (u8*) path);
++            len = foc.len = TCP_FASTOPEN_COOKIE_SIZE;
++		} else {
++            printk ("K: CGen: No ctx!!1 \n");
++			len = 0;
++		}
++		rcu_read_unlock();
++
++		printk("K: TFO Cookie Generate\n");
++
++		lock_sock(sk);
++		release_sock(sk);
++
++		{
++		    char hexbuf[128];
++		    printk("K: Generate Cookie of length %d\n", foc.len);
++		    hex_dump_to_buffer(foc.val, sizeof(foc.val),
++		        16, 1,
++		        hexbuf, sizeof(hexbuf), true);
++		    printk("K: Generate cookie buffer: %s\n", hexbuf);
++	    }
++
++		len = min_t(unsigned int, len, sizeof(foc.val));
++		if (put_user(len, optlen)) {
++		    printk ("cookie gen: put_user\n");
++			return -EFAULT;
++		}
++		if (copy_to_user(optval, &foc.val, foc.len))
++			return -EFAULT;
++		return 0;
++	}
+ 	case TCP_THIN_LINEAR_TIMEOUTS:
+ 		val = tp->thin_lto;
+ 		break;
+diff --git a/net/ipv4/tcp_fastopen.c b/net/ipv4/tcp_fastopen.c
+index 018a48477355..f66e43a34f35 100644
+--- a/net/ipv4/tcp_fastopen.c
++++ b/net/ipv4/tcp_fastopen.c
+@@ -116,6 +116,7 @@ static bool __tcp_fastopen_cookie_gen(struct sock *sk, const void *path,
+ {
+ 	struct tcp_fastopen_context *ctx;
+ 	bool ok = false;
++	const bool debug = false;
+ 
+ 	rcu_read_lock();
+ 
+@@ -127,6 +128,26 @@ static bool __tcp_fastopen_cookie_gen(struct sock *sk, const void *path,
+ 		crypto_cipher_encrypt_one(ctx->tfm, foc->val, path);
+ 		foc->len = TCP_FASTOPEN_COOKIE_SIZE;
+ 		ok = true;
++
++		if (debug) {
++		    char hexbuf[128];
++		    printk ("TCPFOCGen: really created this cookie now\n");
++		    hex_dump_to_buffer (foc->val, 16,
++		        16, 1,
++		        hexbuf, sizeof (hexbuf), true
++		    );
++		    printk ("cook: %s\n", hexbuf);
++		    hex_dump_to_buffer (ctx->key, 16,
++		        16, 1,
++		        hexbuf, sizeof (hexbuf), true
++		    );
++		    printk ("key : %s\n", hexbuf);
++		    hex_dump_to_buffer (path, 16,
++		        16, 1,
++		        hexbuf, sizeof (hexbuf), true
++		    );
++		    printk ("path: %s\n", hexbuf);
++		}
+ 	}
+ 	rcu_read_unlock();
+ 	return ok;
+diff --git a/net/ipv4/tcp_metrics.c b/net/ipv4/tcp_metrics.c
+index 03b51cdcc731..718d14259c99 100644
+--- a/net/ipv4/tcp_metrics.c
++++ b/net/ipv4/tcp_metrics.c
+@@ -549,21 +549,31 @@ void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
+ 			    struct tcp_fastopen_cookie *cookie)
+ {
+ 	struct tcp_metrics_block *tm;
++	struct dst_entry *dst;
+ 
+ 	rcu_read_lock();
+-	tm = tcp_get_metrics(sk, __sk_dst_get(sk), false);
+-	if (tm) {
+-		struct tcp_fastopen_metrics *tfom = &tm->tcpm_fastopen;
+-		unsigned int seq;
+-
+-		do {
+-			seq = read_seqbegin(&fastopen_seqlock);
+-			if (tfom->mss)
+-				*mss = tfom->mss;
+-			*cookie = tfom->cookie;
+-			if (cookie->len <= 0 && tfom->try_exp == 1)
+-				cookie->exp = true;
+-		} while (read_seqretry(&fastopen_seqlock, seq));
++	//printk ("K: enter tcp_fastopen_cache_get\n");
++	dst = __sk_dst_get(sk);
++	//printk ("K: got dst %x\n", dst);
++	if (!dst) {
++	    printk ("K: tfo cache_get: no dst!!1\n");
++	} else {
++    	tm = tcp_get_metrics(sk, dst, false);
++    	//printk ("K: got mettric %x\n", tm);
++    	if (tm) {
++    		struct tcp_fastopen_metrics *tfom = &tm->tcpm_fastopen;
++    		//printk ("K: tfom: %x\n", tfom);
++    		unsigned int seq;
++
++    		do {
++    			seq = read_seqbegin(&fastopen_seqlock);
++    			if (tfom->mss)
++    				*mss = tfom->mss;
++    			*cookie = tfom->cookie;
++    			if (cookie->len <= 0 && tfom->try_exp == 1)
++    				cookie->exp = true;
++    		} while (read_seqretry(&fastopen_seqlock, seq));
++    	}
+ 	}
+ 	rcu_read_unlock();
+ }
+@@ -575,8 +585,10 @@ void tcp_fastopen_cache_set(struct sock *sk, u16 mss,
+ 	struct dst_entry *dst = __sk_dst_get(sk);
+ 	struct tcp_metrics_block *tm;
+ 
+-	if (!dst)
++	if (!dst) {
++	    printk ("K: no dst, no cache_set\n");
+ 		return;
++	}
+ 	rcu_read_lock();
+ 	tm = tcp_get_metrics(sk, dst, true);
+ 	if (tm) {
+
+
+
+
+
+
 Linux kernel
 ============
 
